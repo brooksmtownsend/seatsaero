@@ -30,7 +30,7 @@ jobs:
             echo "DOIT" >> $GITHUB_ENV
             DATE_TAG=$(date +'%Y%m%d%H%M%S')
             echo "RELEASE_TAG=v${DATE_TAG}" >> $GITHUB_ENV
-            echo "RELEASE_TITLE=Release ${DATE_TAG}" >> $GITHUB_ENV`
+            echo "RELEASE_TITLE=Release ${DATE_TAG}" >> $GITHUB_ENV
           else
             echo "trips.json does not contain elements in the array, wrapping up"
           fi
