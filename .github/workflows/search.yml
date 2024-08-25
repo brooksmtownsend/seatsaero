@@ -1,0 +1,27 @@
+name: Go Build and Run
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build the Go project
+        run: go build -v ./...
+      - name: Run the Go project
+        env:
+          SEATS_AERO_API_KEY: ${{ secrets.SEATS_AERO_API_KEY }}
+        run: ./seatsaero search > trips.json
+
+      - name: Upload trips result
+        uses: actions/upload-artifact@v4
+        with:
+          name: trips
