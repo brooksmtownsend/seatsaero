@@ -131,7 +131,19 @@ type BookingLink struct {
 
 // Internal use
 
+type MinimalTrip struct {
+	ID             string    `json:"id"`
+	RemainingSeats int       `json:"remaining_seats"`
+	Cabin          string    `json:"cabin"`
+	DepartsAt      time.Time `json:"departs_at"`
+	ArrivesAt      time.Time `json:"arrives_at"`
+	Stops          int       `json:"stops"`
+	MileageCost    int       `json:"mileage_cost"`
+	TotalTaxes     int       `json:"total_taxes"`
+	Source         string    `json:"source"`
+}
+
 type TripBooking struct {
-	Trips    []Trip        `json:"trips"`
+	Trips    []MinimalTrip `json:"trips"`
 	Bookings []BookingLink `json:"bookings"`
 }

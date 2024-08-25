@@ -3,7 +3,7 @@
 source .env
 
 # Just a sample request to test connectivity
-curl \
+curl -v \
     --header "Partner-Authorization: $SEATS_AERO_API_KEY" \
     --header "accept: application/json" \
-    https://seats.aero/partnerapi/routes | jq > routes.json
+    https://seats.aero/partnerapi/routes

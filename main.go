@@ -14,8 +14,9 @@ import (
 const API_KEY_ENV = "SEATS_AERO_API_KEY"
 const API_BASE_URL = "https://seats.aero/partnerapi"
 
-// Should probably be less, this * 4 is the whole trip (2 ways, 2 people)
-const POINT_THRESHOLD = 75000
+// Agreed upon point thresholds
+const PREMIUM_POINT_THRESHOLD = 37500
+const BUSINESS_POINT_THRESHOLD = 65000
 
 func main() {
 	if len(os.Args) < 2 {
@@ -30,7 +31,7 @@ func main() {
 	case "gettrip":
 		response = string(getTrip(os.Args[2]))
 	case "search":
-		trips := cachedSearch()
+		trips := searchSpring()
 		var wg sync.WaitGroup
 		results := make([]TripBooking, len(trips))
 		for i, trip := range trips {
@@ -41,7 +42,7 @@ func main() {
 				var rr RouteResponse
 				err := json.Unmarshal(result, &rr)
 				checkError("unmarshal_route_response", err)
-				results[i] = TripBooking{Trips: rr.Data, Bookings: rr.BookingLinks}
+				results[i] = usefulData(rr.Data, rr.BookingLinks)
 			}(i, trip)
 		}
 		wg.Wait()
@@ -55,41 +56,61 @@ func main() {
 	fmt.Println(response)
 }
 
-func getTrip(id string) []byte {
-	url := fmt.Sprintf("%s/trips/%s", API_BASE_URL, id)
-	req, err := http.NewRequest("GET", url, nil)
-	checkError("make_get_trip", err)
+func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
+	minimalTrips := make([]MinimalTrip, len(trips))
+	for i, trip := range trips {
+		if trip.Cabin == "economy" {
+			continue
+		}
+		minimalTrips[i] = MinimalTrip{
+			ID:             trip.ID,
+			RemainingSeats: trip.RemainingSeats,
+			Cabin:          trip.Cabin,
+			DepartsAt:      trip.DepartsAt,
+			ArrivesAt:      trip.ArrivesAt,
+			Stops:          trip.Stops,
+			MileageCost:    trip.MileageCost,
+			TotalTaxes:     trip.TotalTaxes,
+			Source:         trip.Source,
+		}
+	}
 
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Partner-Authorization", os.Getenv(API_KEY_ENV))
-	res, err := http.DefaultClient.Do(req)
-	checkError("get_trip", err)
-
-	defer res.Body.Close()
-	resp, err := io.ReadAll(res.Body)
-	checkError("read_get_trip", err)
-
-	return resp
+	return TripBooking{Trips: minimalTrips, Bookings: bookings}
 }
 
-func cachedSearch() []string {
-	queryParams := "origin_airport=USA%2CDCA%2CBWI&destination_airport=SEL%2CJPN&cabin=business&start_date=2025-04-01&end_date=2025-05-31&take=1000&order_by=lowest_mileage"
-	url := fmt.Sprintf("%s/search?%s", API_BASE_URL, queryParams)
-	req, err := http.NewRequest("GET", url, nil)
-	checkError("make_cached_search", err)
+func getTrip(id string) []byte {
+	url := fmt.Sprintf("%s/trips/%s", API_BASE_URL, id)
+	response, err := query(url)
+	checkError("get_trip", err)
 
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("Partner-Authorization", os.Getenv(API_KEY_ENV))
-	res, err := http.DefaultClient.Do(req)
-	checkError("get_cached_search", err)
+	return response
+}
 
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	checkError("read_cached_search", err)
+// Search Apr 01 to May 31 for flights
+func searchSpring() []string {
+	queryParams := "origin_airport=USA%2CDCA%2CBWI&destination_airport=SEL%2CJPN&start_date=2025-04-01&end_date=2025-05-31&take=1000&order_by=lowest_mileage"
 
-	var response SearchResponse
-	err = json.Unmarshal(body, &response)
-	checkError("unmarshal_cached_search", err)
+	cabins := []string{"premium", "business", "first"}
+	availabilities := []Availability{}
+
+	var wg sync.WaitGroup
+	for _, cabin := range cabins {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			url := fmt.Sprintf("%s/search?%s&cabin=%s", API_BASE_URL, queryParams, cabin)
+			body, err := query(url)
+			fmt.Println(err)
+			checkError("cached_search", err)
+
+			var response SearchResponse
+			err = json.Unmarshal(body, &response)
+			checkError("unmarshal_cached_search", err)
+			availabilities = append(availabilities, response.Data...)
+		}()
+	}
+
+	wg.Wait()
 
 	// TODO: search fall too
 	// TODO: look for more results if we're under the threshold in the first 1000
@@ -98,24 +119,71 @@ func cachedSearch() []string {
 
 	var tripIds []string
 
-	for _, availability := range response.Data {
-		mileageCost, err := strconv.Atoi(availability.JMileageCost)
-		checkError("convert_cached_search", err)
-
-		directMileageCost := availability.JDirectMileageCost
-		if (mileageCost > 0 && mileageCost <= POINT_THRESHOLD && availability.JRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= POINT_THRESHOLD && availability.JDirectRemainingSeats >= 2) {
+	for _, availability := range availabilities {
+		if meetsPremiumCriteria(availability) || meetsBusinessCriteria(availability) || meetsFirstCriteria(availability) {
 			tripIds = append(tripIds, availability.ID)
 		}
 
-		// Just a circuit breaker to avoid too many requests
-		if mileageCost > POINT_THRESHOLD && directMileageCost > POINT_THRESHOLD {
-			break
-		}
+		// Just a circuit breaker to avoid continuing the search if we're past the threshold already
+		// if mileageCost > BUSINESS_POINT_THRESHOLD && directMileageCost > BUSINESS_POINT_THRESHOLD {
+		// 	break
+		// }
 	}
 
 	// TODO: search for return options as well
 
 	return tripIds
+}
+
+// Helper function to make a query to the API
+func query(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return make([]byte, 0), err
+	}
+
+	req.Header.Add("accept", "application/json")
+	req.Header.Add("Partner-Authorization", os.Getenv(API_KEY_ENV))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return make([]byte, 0), err
+	}
+
+	defer res.Body.Close()
+	resp, err := io.ReadAll(res.Body)
+	if err != nil {
+		return make([]byte, 0), err
+	}
+
+	if res.StatusCode != 200 {
+		return make([]byte, 0), fmt.Errorf("error querying API (%d): %s", res.StatusCode, resp)
+	}
+
+	return resp, nil
+}
+
+// Helper function to check if the availability meets "worth it" criteria
+func meetsPremiumCriteria(a Availability) bool {
+	directMileageCost := a.WDirectMileageCost
+	mileageCost, err := strconv.Atoi(a.WMileageCost)
+	checkError("convert_premium_criteria", err)
+	return (mileageCost > 0 && mileageCost <= PREMIUM_POINT_THRESHOLD && a.WRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= PREMIUM_POINT_THRESHOLD && a.WDirectRemainingSeats >= 2)
+}
+
+// Helper function to check if the availability meets "worth it" criteria
+func meetsBusinessCriteria(a Availability) bool {
+	directMileageCost := a.JDirectMileageCost
+	mileageCost, err := strconv.Atoi(a.JMileageCost)
+	checkError("convert_business_criteria", err)
+	return (mileageCost > 0 && mileageCost <= BUSINESS_POINT_THRESHOLD && a.JRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= BUSINESS_POINT_THRESHOLD && a.JDirectRemainingSeats >= 2)
+}
+
+// Helper function to check if the availability meets "worth it" criteria
+func meetsFirstCriteria(a Availability) bool {
+	directMileageCost := a.FDirectMileageCost
+	mileageCost, err := strconv.Atoi(a.FMileageCost)
+	checkError("first_business_criteria", err)
+	return (mileageCost > 0 && mileageCost <= BUSINESS_POINT_THRESHOLD && a.FRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= BUSINESS_POINT_THRESHOLD && a.FDirectRemainingSeats >= 2)
 }
 
 // Helper function to check for the error and output to JSON in case of jq use
