@@ -2,6 +2,7 @@ name: Go Build and Run
 on:
   workflow_dispatch:
   schedule:
+    # Run hourly
     - cron: '0 * * * *'
 
 jobs:

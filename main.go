@@ -101,7 +101,7 @@ func cachedSearch() []string {
 		checkError(err)
 
 		directMileageCost := availability.JDirectMileageCost
-		if (mileageCost > 0 && mileageCost <= POINT_THRESHOLD) || (directMileageCost > 0 && directMileageCost <= POINT_THRESHOLD) {
+		if (mileageCost > 0 && mileageCost <= POINT_THRESHOLD && availability.JRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= POINT_THRESHOLD && availability.JDirectRemainingSeats >= 2) {
 			tripIds = append(tripIds, availability.ID)
 		}
 
