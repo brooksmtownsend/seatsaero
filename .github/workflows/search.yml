@@ -22,8 +22,30 @@ jobs:
           SEATS_AERO_API_KEY: ${{ secrets.SEATS_AERO_API_KEY }}
         run: ./seatsaero search > trips.json
 
+      - name: Decisions decisions
+        run:
+          echo "Seeing if trip was available"
+          if [ -f trips.json ] && [ $(jq 'length' trips.json) -gt 0 ]; then
+            echo "trips.json contains elements in the array"
+            echo "DOIT" >> $GITHUB_ENV
+            DATE_TAG=$(date +'%Y%m%d%H%M%S')
+            echo "RELEASE_TAG=v${DATE_TAG}" >> $GITHUB_ENV
+            echo "RELEASE_TITLE=Release ${DATE_TAG}" >> $GITHUB_ENV`
+          else
+            echo "trips.json does not contain elements in the array, wrapping up"
+          fi
+
       - name: Upload trips result
         uses: actions/upload-artifact@v4
         with:
           name: trips
           path: trips.json
+
+      - name: create release
+        if: ${{ env.DOIT == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: trips.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ env.RELEASE_TAG }}
+          title: ${{ env.RELEASE_TITLE }}
