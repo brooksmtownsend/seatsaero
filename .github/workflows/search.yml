@@ -25,7 +25,7 @@ jobs:
       - name: Decisions decisions
         run: |
           echo "Seeing if trip was available"
-          if [ -f trips.json ] && [ $(jq 'length' trips.json) -gt 0 ]; then
+          if [ -f trips.json ] && [ $(cat trips.json | jq 'length') -gt 0 ]; then
             echo "trips.json contains elements in the array"
             echo "DOIT" >> $GITHUB_ENV
             DATE_TAG=$(date +'%Y%m%d%H%M%S')

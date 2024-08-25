@@ -113,6 +113,8 @@ func cachedSearch() []string {
 		}
 	}
 
+	// TODO: search for return options as well
+
 	return tripIds
 }
 
