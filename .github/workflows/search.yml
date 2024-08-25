@@ -23,7 +23,7 @@ jobs:
         run: ./seatsaero search > trips.json
 
       - name: Decisions decisions
-        run:
+        run: |
           echo "Seeing if trip was available"
           if [ -f trips.json ] && [ $(jq 'length' trips.json) -gt 0 ]; then
             echo "trips.json contains elements in the array"
