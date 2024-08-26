@@ -26,33 +26,38 @@ func main() {
 		log.Fatal("{\"context\": \"init\", \"error\": \"Missing API key\"}")
 	}
 
-	trips := search("2025-04-01", "2025-05-31")
+	stderr("main", "Starting search")
+	tripBookings := findTrips()
+	trips, err := json.Marshal(tripBookings)
+	checkError("marshal_results", err)
+	stderr("main", fmt.Sprintf("Found %d trips", len(tripBookings)))
+	fmt.Println(string(trips))
+}
+
+func findTrips() []TripBooking {
+	tripIds := search("2024-03-15", "2025-05-20")
 	// TODO: Enable this when we're a year out
-	// fallTrips := search("2025-09-01", "2025-10-31")
+	// fallTrips := search("2024-09-15", "2025-10-31")
 	// trips = append(trips, fallTrips...)
 
 	// Fetch all the trips for additional info, concurrently
 	var wg sync.WaitGroup
-	results := make([]TripBooking, len(trips))
-	for i, trip := range trips {
-		wg.Add(1)
+	results := make([]TripBooking, 0)
+	for i, trip := range tripIds {
+		wg.Add(0)
 		go func(i int, trip string) {
 			defer wg.Done()
-			result := getTrip(trip)
-			var rr RouteResponse
-			err := json.Unmarshal(result, &rr)
-			checkError("unmarshal_route_response", err)
-			results[i] = usefulData(rr.Data, rr.BookingLinks)
+			routeResponse := getTrip(trip)
+			results = append(results, usefulData(routeResponse.Data, routeResponse.BookingLinks))
 		}(i, trip)
 	}
 	wg.Wait()
 
-	tripJson, err := json.Marshal(results)
-	checkError("marshal_results", err)
-	fmt.Println(string(tripJson))
+	return results
 }
 
 func search(startDate string, endDate string) []string {
+	stderr("search", fmt.Sprintf("Searching for trips from %s to %s", startDate, endDate))
 	cabins := []string{"premium", "business", "first"}
 	availabilities := []Availability{}
 
@@ -68,16 +73,19 @@ func search(startDate string, endDate string) []string {
 			var response SearchResponse
 			err = json.Unmarshal(body, &response)
 			checkError("unmarshal_cached_search", err)
+
+			stderr("search", fmt.Sprintf("Retrieved %d results for %s", len(response.Data), cabin))
 			availabilities = append(availabilities, response.Data...)
 		}()
 	}
 
 	wg.Wait()
 
-	// TODO: search fall too
 	// TODO: look for more results if we're under the threshold in the first 1000
 	// TODO: establish tiers of trips, preferring low direct mileage, then low, then just results
 	// TODO: all kinds of filtering
+
+	// Would be easier if I split an availability into a particular cabin object, then I could do better filtering
 
 	var tripIds []string
 
@@ -85,11 +93,6 @@ func search(startDate string, endDate string) []string {
 		if meetsPremiumCriteria(availability) || meetsBusinessCriteria(availability) || meetsFirstCriteria(availability) {
 			tripIds = append(tripIds, availability.ID)
 		}
-
-		// Just a circuit breaker to avoid continuing the search if we're past the threshold already
-		// if mileageCost > BUSINESS_POINT_THRESHOLD && directMileageCost > BUSINESS_POINT_THRESHOLD {
-		// 	break
-		// }
 	}
 
 	// TODO: search for return options as well
@@ -98,16 +101,21 @@ func search(startDate string, endDate string) []string {
 }
 
 // Retrieve an individual trip
-func getTrip(id string) []byte {
+func getTrip(id string) RouteResponse {
 	url := fmt.Sprintf("%s/trips/%s", API_BASE_URL, id)
 	response, err := query(url)
 	checkError("get_trip", err)
 
-	return response
+	var rr RouteResponse
+	err = json.Unmarshal(response, &rr)
+	checkError("unmarshal_route_response", err)
+
+	return rr
 }
 
 // Helper function to make a query to the API
 func query(url string) ([]byte, error) {
+	stderr("query", fmt.Sprintf("Querying %s", url))
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return make([]byte, 0), err
@@ -136,6 +144,9 @@ func query(url string) ([]byte, error) {
 // Helper function to check if the availability meets "worth it" criteria
 func meetsPremiumCriteria(a Availability) bool {
 	directMileageCost := a.WDirectMileageCost
+	if a.WMileageCost == "" {
+		return false
+	}
 	mileageCost, err := strconv.Atoi(a.WMileageCost)
 	checkError("convert_premium_criteria", err)
 	return (mileageCost > 0 && mileageCost <= PREMIUM_POINT_THRESHOLD && a.WRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= PREMIUM_POINT_THRESHOLD && a.WDirectRemainingSeats >= 2)
@@ -144,6 +155,9 @@ func meetsPremiumCriteria(a Availability) bool {
 // Helper function to check if the availability meets "worth it" criteria
 func meetsBusinessCriteria(a Availability) bool {
 	directMileageCost := a.JDirectMileageCost
+	if a.JMileageCost == "" {
+		return false
+	}
 	mileageCost, err := strconv.Atoi(a.JMileageCost)
 	checkError("convert_business_criteria", err)
 	return (mileageCost > 0 && mileageCost <= BUSINESS_POINT_THRESHOLD && a.JRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= BUSINESS_POINT_THRESHOLD && a.JDirectRemainingSeats >= 2)
@@ -152,6 +166,9 @@ func meetsBusinessCriteria(a Availability) bool {
 // Helper function to check if the availability meets "worth it" criteria
 func meetsFirstCriteria(a Availability) bool {
 	directMileageCost := a.FDirectMileageCost
+	if a.FMileageCost == "" {
+		return false
+	}
 	mileageCost, err := strconv.Atoi(a.FMileageCost)
 	checkError("first_business_criteria", err)
 	return (mileageCost > 0 && mileageCost <= BUSINESS_POINT_THRESHOLD && a.FRemainingSeats >= 2) || (directMileageCost > 0 && directMileageCost <= BUSINESS_POINT_THRESHOLD && a.FDirectRemainingSeats >= 2)
@@ -160,7 +177,7 @@ func meetsFirstCriteria(a Availability) bool {
 // Helper function to check for the error and output to JSON in case of jq use
 func checkError(ctx string, err error) {
 	if err != nil {
-		log.Fatalf("{\"context\": \"%s\"\"error\": \"%s\"}", ctx, err)
+		log.Fatalf("{\"context\": \"%s\", \"error\": \"%s\"}", ctx, err)
 	}
 }
 
@@ -185,4 +202,8 @@ func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
 	}
 
 	return TripBooking{Trips: minimalTrips, Bookings: bookings}
+}
+
+func stderr(ctx string, msg string) {
+	fmt.Fprintf(os.Stderr, "{\"context\": \"%s\", \"message\": \"%s\"}\n", ctx, msg)
 }
