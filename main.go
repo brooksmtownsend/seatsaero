@@ -16,7 +16,7 @@ const API_BASE_URL = "https://seats.aero/partnerapi"
 
 // Agreed upon point thresholds
 const PREMIUM_POINT_THRESHOLD = 37500
-const BUSINESS_POINT_THRESHOLD = 65000
+const BUSINESS_POINT_THRESHOLD = 75000
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,12 +57,12 @@ func main() {
 }
 
 func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
-	minimalTrips := make([]MinimalTrip, len(trips))
-	for i, trip := range trips {
+	minimalTrips := make([]MinimalTrip, 0)
+	for _, trip := range trips {
 		if trip.Cabin == "economy" {
 			continue
 		}
-		minimalTrips[i] = MinimalTrip{
+		minimalTrips = append(minimalTrips, MinimalTrip{
 			ID:             trip.ID,
 			RemainingSeats: trip.RemainingSeats,
 			Cabin:          trip.Cabin,
@@ -72,7 +72,7 @@ func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
 			MileageCost:    trip.MileageCost,
 			TotalTaxes:     trip.TotalTaxes,
 			Source:         trip.Source,
-		}
+		})
 	}
 
 	return TripBooking{Trips: minimalTrips, Bookings: bookings}
@@ -100,7 +100,6 @@ func searchSpring() []string {
 			defer wg.Done()
 			url := fmt.Sprintf("%s/search?%s&cabin=%s", API_BASE_URL, queryParams, cabin)
 			body, err := query(url)
-			fmt.Println(err)
 			checkError("cached_search", err)
 
 			var response SearchResponse
