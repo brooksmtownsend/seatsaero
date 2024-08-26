@@ -20,7 +20,7 @@ jobs:
       - name: Run the Go project
         env:
           SEATS_AERO_API_KEY: ${{ secrets.SEATS_AERO_API_KEY }}
-        run: ./seatsaero search > trips.json
+        run: ./seatsaero > trips.json
 
       - name: Decisions decisions
         run: |

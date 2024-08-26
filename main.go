@@ -14,82 +14,45 @@ import (
 const API_KEY_ENV = "SEATS_AERO_API_KEY"
 const API_BASE_URL = "https://seats.aero/partnerapi"
 
+// Looking for flights from USA/WAS to Seoul and Japan
+const SEARCH_PARAMS = "origin_airport=USA%2CDCA%2CBWI&destination_airport=SEL%2CJPN&take=1000&order_by=lowest_mileage"
+
 // Agreed upon point thresholds
 const PREMIUM_POINT_THRESHOLD = 37500
 const BUSINESS_POINT_THRESHOLD = 75000
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("{\"context\": \"init\", \"error\": \"Expected one of 'gettrip' or 'search'\"}")
-	}
-
 	if os.Getenv(API_KEY_ENV) == "" {
 		log.Fatal("{\"context\": \"init\", \"error\": \"Missing API key\"}")
 	}
-	var response string
-	switch os.Args[1] {
-	case "gettrip":
-		response = string(getTrip(os.Args[2]))
-	case "search":
-		trips := searchSpring()
-		var wg sync.WaitGroup
-		results := make([]TripBooking, len(trips))
-		for i, trip := range trips {
-			wg.Add(1)
-			go func(i int, trip string) {
-				defer wg.Done()
-				result := getTrip(trip)
-				var rr RouteResponse
-				err := json.Unmarshal(result, &rr)
-				checkError("unmarshal_route_response", err)
-				results[i] = usefulData(rr.Data, rr.BookingLinks)
-			}(i, trip)
-		}
-		wg.Wait()
-		out, err := json.Marshal(results)
-		checkError("marshal_results", err)
-		response = string(out)
-	default:
-		response = "{\"error\": \"Invalid command, expected one of 'gettrip' or 'search'\"}"
+
+	trips := search("2025-04-01", "2025-05-31")
+	// TODO: Enable this when we're a year out
+	// fallTrips := search("2025-09-01", "2025-10-31")
+	// trips = append(trips, fallTrips...)
+
+	// Fetch all the trips for additional info, concurrently
+	var wg sync.WaitGroup
+	results := make([]TripBooking, len(trips))
+	for i, trip := range trips {
+		wg.Add(1)
+		go func(i int, trip string) {
+			defer wg.Done()
+			result := getTrip(trip)
+			var rr RouteResponse
+			err := json.Unmarshal(result, &rr)
+			checkError("unmarshal_route_response", err)
+			results[i] = usefulData(rr.Data, rr.BookingLinks)
+		}(i, trip)
 	}
+	wg.Wait()
 
-	fmt.Println(response)
+	tripJson, err := json.Marshal(results)
+	checkError("marshal_results", err)
+	fmt.Println(string(tripJson))
 }
 
-func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
-	minimalTrips := make([]MinimalTrip, 0)
-	for _, trip := range trips {
-		if trip.Cabin == "economy" {
-			continue
-		}
-		minimalTrips = append(minimalTrips, MinimalTrip{
-			ID:             trip.ID,
-			RemainingSeats: trip.RemainingSeats,
-			Cabin:          trip.Cabin,
-			DepartsAt:      trip.DepartsAt,
-			ArrivesAt:      trip.ArrivesAt,
-			Stops:          trip.Stops,
-			MileageCost:    trip.MileageCost,
-			TotalTaxes:     trip.TotalTaxes,
-			Source:         trip.Source,
-		})
-	}
-
-	return TripBooking{Trips: minimalTrips, Bookings: bookings}
-}
-
-func getTrip(id string) []byte {
-	url := fmt.Sprintf("%s/trips/%s", API_BASE_URL, id)
-	response, err := query(url)
-	checkError("get_trip", err)
-
-	return response
-}
-
-// Search Apr 01 to May 31 for flights
-func searchSpring() []string {
-	queryParams := "origin_airport=USA%2CDCA%2CBWI&destination_airport=SEL%2CJPN&start_date=2025-04-01&end_date=2025-05-31&take=1000&order_by=lowest_mileage"
-
+func search(startDate string, endDate string) []string {
 	cabins := []string{"premium", "business", "first"}
 	availabilities := []Availability{}
 
@@ -98,7 +61,7 @@ func searchSpring() []string {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			url := fmt.Sprintf("%s/search?%s&cabin=%s", API_BASE_URL, queryParams, cabin)
+			url := fmt.Sprintf("%s/search?%s&cabin=%s&start_date=%s&end_date=%s", API_BASE_URL, SEARCH_PARAMS, cabin, startDate, endDate)
 			body, err := query(url)
 			checkError("cached_search", err)
 
@@ -132,6 +95,15 @@ func searchSpring() []string {
 	// TODO: search for return options as well
 
 	return tripIds
+}
+
+// Retrieve an individual trip
+func getTrip(id string) []byte {
+	url := fmt.Sprintf("%s/trips/%s", API_BASE_URL, id)
+	response, err := query(url)
+	checkError("get_trip", err)
+
+	return response
 }
 
 // Helper function to make a query to the API
@@ -190,4 +162,27 @@ func checkError(ctx string, err error) {
 	if err != nil {
 		log.Fatalf("{\"context\": \"%s\"\"error\": \"%s\"}", ctx, err)
 	}
+}
+
+// Short transform to pull a subset of the data included in the response
+func usefulData(trips []Trip, bookings []BookingLink) TripBooking {
+	minimalTrips := make([]MinimalTrip, 0)
+	for _, trip := range trips {
+		if trip.Cabin == "economy" {
+			continue
+		}
+		minimalTrips = append(minimalTrips, MinimalTrip{
+			ID:             trip.ID,
+			RemainingSeats: trip.RemainingSeats,
+			Cabin:          trip.Cabin,
+			DepartsAt:      trip.DepartsAt,
+			ArrivesAt:      trip.ArrivesAt,
+			Stops:          trip.Stops,
+			MileageCost:    trip.MileageCost,
+			TotalTaxes:     trip.TotalTaxes,
+			Source:         trip.Source,
+		})
+	}
+
+	return TripBooking{Trips: minimalTrips, Bookings: bookings}
 }
