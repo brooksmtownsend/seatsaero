@@ -36,9 +36,8 @@ func main() {
 
 func findTrips() []TripBooking {
 	tripIds := search("2024-03-15", "2025-05-20")
-	// TODO: Enable this when we're a year out
-	// fallTrips := search("2024-09-15", "2025-10-31")
-	// trips = append(trips, fallTrips...)
+	fallTrips := search("2024-09-15", "2025-10-31")
+	tripIds = append(tripIds, fallTrips...)
 
 	// Fetch all the trips for additional info, concurrently
 	var wg sync.WaitGroup
