@@ -63,7 +63,7 @@ func search(startDate string, endDate string) []string {
 	var wg sync.WaitGroup
 	for _, cabin := range cabins {
 		wg.Add(1)
-		go func() {
+		go func(cabin string) {
 			defer wg.Done()
 			url := fmt.Sprintf("%s/search?%s&cabin=%s&start_date=%s&end_date=%s", API_BASE_URL, SEARCH_PARAMS, cabin, startDate, endDate)
 			body, err := query(url)
@@ -75,7 +75,7 @@ func search(startDate string, endDate string) []string {
 
 			stderr("search", fmt.Sprintf("Retrieved %d results for %s", len(response.Data), cabin))
 			availabilities = append(availabilities, response.Data...)
-		}()
+		}(cabin)
 	}
 
 	wg.Wait()
