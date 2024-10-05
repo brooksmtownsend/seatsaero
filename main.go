@@ -20,8 +20,8 @@ const API_BASE_URL = "https://seats.aero/partnerapi"
 const SEARCH_PARAMS = "origin_airport=SEL&destination_airport=USA%2CCLT&take=1000&order_by=lowest_mileage"
 
 // Agreed upon point thresholds
-const PREMIUM_POINT_THRESHOLD = 37500
-const BUSINESS_POINT_THRESHOLD = 90000
+const PREMIUM_POINT_THRESHOLD = 50000
+const BUSINESS_POINT_THRESHOLD = 100000
 
 func main() {
 	if os.Getenv(API_KEY_ENV) == "" {
@@ -37,7 +37,7 @@ func main() {
 }
 
 func findTrips() []TripBooking {
-	tripIds := search("2025-09-28", "2025-10-03")
+	tripIds := search("2025-10-03", "2025-10-05")
 
 	// Fetch all the trips for additional info, concurrently
 	var wg sync.WaitGroup
